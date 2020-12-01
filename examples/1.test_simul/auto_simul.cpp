@@ -28,7 +28,7 @@ int main(int argc, char** argv){
         if(system -> is_connected()){discovered_system = true;} //Discovered system
     }); //Waiting to discover system
 
-    std::this_thread::sleep_for(std::chrono::seconds(2)); //hearbeats at 1Hz
+    this_thread::sleep_for(chrono::seconds(2)); //hearbeats at 1Hz
 
     if(!discovered_system){return 1;} //No system found
 
@@ -43,6 +43,11 @@ int main(int argc, char** argv){
     const Telemetry::Result set_rate_result = telemetry -> set_rate_position(1.0);
 
     if(set_rate_result != Telemetry::Result::Success){return 1;} //Set rate failed
+    telemetry->subscribe_position([](Telemetry::Position position) {
+        cout << " Home latitude : " << position.latitude_deg << endl;
+        cout << " Home longitude : " << position.longitude_deg << endl;
+    });
+    this_thread::sleep_for(chrono::seconds(1)); // Not finished mission
 
     telemetry -> subscribe_position([](Telemetry::Position position){
         cout << " Altitude : " << position.relative_altitude_m << "m" << endl;
@@ -72,21 +77,6 @@ int main(int argc, char** argv){
         return 1;
     }
 
-    //5. Landing ------------------------------------------------------------------------------------
-    this_thread::sleep_for(chrono::seconds(10)); //stuck air
-    cout << " Landing... " << endl;
-    const Action::Result land_result = action -> land();
-
-    if(land_result != Action::Result::Success){return 1;} //Land failed
-
-    while(telemetry -> in_air()){ //Check if vehicle is still in air
-        this_thread::sleep_for(chrono::seconds(1)); //Vehicle is landing...
-    }
-    
-    cout << " Landed! " << endl; //Relying on auto-disarming but let's keep watching the telemetry for a bit longer
-    this_thread::sleep_for(chrono::seconds(3));
-    cout << " Finished... " <<endl;
-
     //6. fly_mission upload(1) -------------------------------------------------------------------------------------
     vector<Mission::MissionItem> mission_items;
     Mission::MissionItem mission_item;
@@ -95,15 +85,30 @@ int main(int argc, char** argv){
     mission_item.longitude_deg = 8.5456490218639658; // range: -180 to +180
     mission_item.relative_altitude_m = 10.0f; // takeoff altitude
     mission_item.speed_m_s = 5.0f;
+    mission_item.is_fly_through = false; // stop on the waypoint, if true don't stop on the waypoint
+    mission_items.push_back(mission_item);
+
+    //waypoint 1
+    mission_item.latitude_deg = 47.399752;
+    mission_item.longitude_deg = 8.545874;
     mission_item.is_fly_through = false; // stop on the waypoint
     mission_items.push_back(mission_item);
-    mission_item.latitude_deg = 47.398139363821485;
+    
+    //waypoint 2
+    mission_item.latitude_deg = 47.399759;
+    mission_item.longitude_deg = 8.544865;
+    mission_item.is_fly_through = false; // stop on the waypoint
+    mission_items.push_back(mission_item);
+
+    //Return to home
+    mission_item.latitude_deg = 47.398170327054473; 
+    mission_item.longitude_deg = 8.5456490218639658; 
     mission_items.push_back(mission_item);
 
     //7. fly_mission upload(2) ------------------------------------------------------------------------------------
     auto mission = make_shared<Mission>(system);
     {
-        auto prom = std::make_shared<promise<Mission::Result>>();
+        auto prom = make_shared<promise<Mission::Result>>();
         auto future_result = prom->get_future();
         Mission::MissionPlan mission_plan;
 
@@ -118,6 +123,7 @@ int main(int argc, char** argv){
         
         if (result != Mission::Result::Success) { return 1; } // Mission upload failed
     }
+
     //8. Mission Progress ----------------------------------------------------------------------------
     {
         cout << " Starting mission. " <<endl;
@@ -131,9 +137,27 @@ int main(int argc, char** argv){
         const Mission::Result result = future_result.get();
         if(result != Mission::Result::Success){return -1;} //Mission start failed
     }
+
     while(!mission -> is_mission_finished().second){
         this_thread::sleep_for(chrono::seconds(1)); // Not finished mission
-    }
+        }
+
+    //9. Landing ------------------------------------------------------------------------------------
+    this_thread::sleep_for(chrono::seconds(10)); //stuck air
+    cout << " Landing... " << endl;
+    const Action::Result land_result = action -> land();
+
+    if(land_result != Action::Result::Success){return 1;} //Land failed
+
+    while(telemetry -> in_air()){ //Check if vehicle is still in air
+        this_thread::sleep_for(chrono::seconds(1)); //Vehicle is landing...
+        }
+    
+    cout << " Landed! " << endl; //Relying on auto-disarming but let's keep watching the telemetry for a bit longer
+    this_thread::sleep_for(chrono::seconds(3));
+    cout << " Finished... " <<endl;
+    
+    //10. rotate 
     return 0;
 }
 
