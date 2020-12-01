@@ -20,5 +20,6 @@ add_executable(auto_simul
 target_link_libraries(auto_simul
     MAVSDK::mavsdk_telemetry
     MAVSDK::mavsdk_action
+    MAVSDK::mavsdk_mission
     MAVSDK::mavsdk
 )

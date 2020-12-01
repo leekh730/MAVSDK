@@ -101,38 +101,39 @@ int main(int argc, char** argv){
     mission_items.push_back(mission_item);
 
     //7. fly_mission upload(2) ------------------------------------------------------------------------------------
-    auto prom = std::make_shared<promise<Mission::Result>>();
-    auto future_result = prom->get_future();
-    Mission::MissionPlan mission_plan;
-
-    mission_plan.mission_items = mission_items;
     auto mission = make_shared<Mission>(system);
+    {
+        auto prom = std::make_shared<promise<Mission::Result>>();
+        auto future_result = prom->get_future();
+        Mission::MissionPlan mission_plan;
 
-    mission->upload_mission_async(mission_plan,
-        [prom](Mission::Result result) {
-            prom->set_value(result);
-            });
+        mission_plan.mission_items = mission_items;
 
-    const Mission::Result result = future_result.get();
-    
-    if (result != Mission::Result::Success) { return 1; } // Mission upload failed
+        mission->upload_mission_async(mission_plan,
+            [prom](Mission::Result result) {
+                prom->set_value(result);
+                });
 
+        const Mission::Result result = future_result.get();
+        
+        if (result != Mission::Result::Success) { return 1; } // Mission upload failed
+    }
     //8. Mission Progress ----------------------------------------------------------------------------
-    cout << " Starting mission. " <<endl;
-    auto start_prom = make_shared < promise < Mission::Result >> ();
-    //auto future_result = start_prom -> get_future();
-    mission -> start_mission_async([start_prom](Mission::Result result){
-        start_prom -> set_value(result);
-        cout << "Started mission. " <<endl;
-    });
+    {
+        cout << " Starting mission. " <<endl;
+        auto start_prom = make_shared < promise < Mission::Result >> ();
+        auto future_result = start_prom -> get_future();
+        mission -> start_mission_async([start_prom](Mission::Result result){
+            start_prom -> set_value(result);
+            cout << "Started mission. " <<endl;
+        });
 
-    //const Mission::Result result = future_result.get();
-    if(result != Mission::Result::Success){return -1;} //Mission start failed
-
+        const Mission::Result result = future_result.get();
+        if(result != Mission::Result::Success){return -1;} //Mission start failed
+    }
     while(!mission -> is_mission_finished().second){
         this_thread::sleep_for(chrono::seconds(1)); // Not finished mission
     }
-
     return 0;
 }
 
