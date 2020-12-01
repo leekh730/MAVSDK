@@ -14,9 +14,8 @@ using namespace std;
 using namespace std::this_thread;
 using namespace std::chrono;
 
-//10.rotate vehicle -> 2.test_control dir에서 실습진행
-// bool offboard_ctrl_body(std::shared_ptr<mavsdk::Offboard>);
-
+bool offboard_ctrl_body(std::shared_ptr<mavsdk::Offboard>);
+// rotate vehicle(1)
 // bool offboard_ctrl_body(std::shared_ptr <mavsdk::Offboard> offboard){
 //     Offboard::Attitude control_stick{}; //Send once before starting offboard
 //     offboard->set_attitude(control_stick);
@@ -27,10 +26,23 @@ using namespace std::chrono;
 //     control_stick.roll_deg = 30.0f;
 //     control_stick.thrust_value = 0.6f;
 //     offboard -> set_attitude(control_stick);
-//     std::this_thread::sleep_for(std::chrono::seconds(5));
+//     this_thread::sleep_for(chrono::seconds(5));
 //     offboard_result = offboard->stop(); // Send it once before ending offboard
 //     return true;
 // }
+// rotate vehicle(2)
+bool offboard_ctrl_body(std::shared_ptr<mavsdk::Offboard> offboard){
+    Offboard::VelocityBodyYawspeed control_stick{}; // before starting offboard
+    offboard->set_velocity_body(control_stick);
+    Offboard::Result offboard_result = offboard->start();
+    if (offboard_result != Offboard::Result::Success) { return 1; } // Failed
+    control_stick.down_m_s = 0.0f; 
+    control_stick.yawspeed_deg_s = 60.0f;
+    offboard->set_velocity_body(control_stick);
+    this_thread::sleep_for(chrono::seconds(5));
+    offboard_result = offboard->stop(); // Send it once before ending offboard
+    return true;
+}
 
 int main(int argc, char** argv){ 
     // 1.connect_result ------------------------------------------------------------------  
@@ -95,76 +107,16 @@ int main(int argc, char** argv){
         cout << " Takeoff failed : " << takeoff_result << endl;
         return 1;
     }
+    this_thread::sleep_for(chrono::seconds(20)); // controller rotate 전 키 값을 주면 기체가 뒤집어짐으로 timesleep을 일정시간 줌
 
-    //10. rotate vehicle 2.test_control에서 실습진행 ------------------------------------------------------------------------------------
+    //10. rotate vehicle(1) ------------------------------------------------------------------------------------
     // auto offboard = make_shared<Offboard>(system);
     // bool ret = offboard_ctrl_body(offboard);
     // if(ret == false){return -1;}
-
-    //6. fly_mission upload(1) -------------------------------------------------------------------------------------
-    vector<Mission::MissionItem> mission_items;
-    Mission::MissionItem mission_item;
-
-    mission_item.latitude_deg = 47.398170327054473; // range: -90 to +90
-    mission_item.longitude_deg = 8.5456490218639658; // range: -180 to +180
-    mission_item.relative_altitude_m = 10.0f; // takeoff altitude
-    mission_item.speed_m_s = 5.0f;
-    mission_item.is_fly_through = false; // stop on the waypoint, if true don't stop on the waypoint
-    mission_items.push_back(mission_item);
-
-    //waypoint 1
-    mission_item.latitude_deg = 47.399752;
-    mission_item.longitude_deg = 8.545874;
-    mission_item.is_fly_through = false; // stop on the waypoint
-    mission_items.push_back(mission_item);
     
-    //waypoint 2
-    mission_item.latitude_deg = 47.399759;
-    mission_item.longitude_deg = 8.544865;
-    mission_item.is_fly_through = false; // stop on the waypoint
-    mission_items.push_back(mission_item);
-
-    //Return to home
-    mission_item.latitude_deg = 47.398170327054473; 
-    mission_item.longitude_deg = 8.5456490218639658; 
-    mission_items.push_back(mission_item);
-
-    //7. fly_mission upload(2) ------------------------------------------------------------------------------------
-    auto mission = make_shared<Mission>(system);
-    {
-        auto prom = make_shared<promise<Mission::Result>>();
-        auto future_result = prom->get_future();
-        Mission::MissionPlan mission_plan;
-
-        mission_plan.mission_items = mission_items;
-
-        mission->upload_mission_async(mission_plan,
-            [prom](Mission::Result result) {
-                prom->set_value(result);
-                });
-
-        const Mission::Result result = future_result.get();
-        
-        if (result != Mission::Result::Success) { return 1; } // Mission upload failed
-    }
-
-    //8. Mission Progress ----------------------------------------------------------------------------
-    {
-        cout << " Starting mission. " <<endl;
-        auto start_prom = make_shared < promise < Mission::Result >> ();
-        auto future_result = start_prom -> get_future();
-        mission -> start_mission_async([start_prom](Mission::Result result){
-            start_prom -> set_value(result);
-            cout << "Started mission. " <<endl;
-        });
-
-        const Mission::Result result = future_result.get();
-        if(result != Mission::Result::Success){return -1;} //Mission start failed
-    }
-
-    while(!mission -> is_mission_finished().second){
-        this_thread::sleep_for(chrono::seconds(1)); // Not finished mission
-        }
+    //rotate vehicle(2)
+    auto offboard = std::make_shared<Offboard>(system);
+    bool ret = offboard_ctrl_body(offboard); if (ret == false) { return -1; }
 
     //9. Landing ------------------------------------------------------------------------------------
     this_thread::sleep_for(chrono::seconds(10)); //stuck air
@@ -181,7 +133,5 @@ int main(int argc, char** argv){
     this_thread::sleep_for(chrono::seconds(3));
     cout << " Finished... " << endl;
     
-    
     return 0;
 }
-
