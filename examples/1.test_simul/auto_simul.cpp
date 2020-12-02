@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <future>
+#include <math.h>
 #include <mavsdk/mavsdk.h>
 #include <mavsdk/plugins/action/action.h>
 #include <mavsdk/plugins/telemetry/telemetry.h>
@@ -14,23 +15,35 @@ using namespace std;
 using namespace std::this_thread;
 using namespace std::chrono;
 
-//10.rotate vehicle -> 2.test_control dir에서 실습진행
-// bool offboard_ctrl_body(std::shared_ptr<mavsdk::Offboard>);
+#define PI 3.141592
 
-// bool offboard_ctrl_body(std::shared_ptr <mavsdk::Offboard> offboard){
-//     Offboard::Attitude control_stick{}; //Send once before starting offboard
-//     offboard->set_attitude(control_stick);
-//     Offboard::Result offboard_result = offboard->start();
-    
-//     if(offboard_result != Offboard::Result::Success){return 1;}
+// rapa/Documents/PX4-Autopilot/make px4_sitl gazebo_typhoon_h480__sonoma_raceway, sonoma_raceway map에서 typhoon_h480 기체로 실행
 
-//     control_stick.roll_deg = 30.0f;
-//     control_stick.thrust_value = 0.6f;
-//     offboard -> set_attitude(control_stick);
-//     std::this_thread::sleep_for(std::chrono::seconds(5));
-//     offboard_result = offboard->stop(); // Send it once before ending offboard
-//     return true;
-// }
+static Mission::MissionItem make_mission_item(
+    double latitude_deg,
+    double longitude_deg,
+    float relative_altitude_m,
+    float speed_m_s,
+    bool is_fly_through,
+    Mission::MissionItem);
+
+Mission::MissionItem make_mission_item(
+    double latitude_deg,
+    double longitude_deg,
+    float relative_altitude_m,
+    float speed_m_s,
+    bool is_fly_through,
+    Mission::MissionItem)
+
+{
+    Mission::MissionItem new_item{};
+    new_item.latitude_deg = latitude_deg;
+    new_item.longitude_deg = longitude_deg;
+    new_item.relative_altitude_m = relative_altitude_m;
+    new_item.speed_m_s = speed_m_s;
+    new_item.is_fly_through = is_fly_through;
+    return new_item;
+}
 
 int main(int argc, char** argv){ 
     // 1.connect_result ------------------------------------------------------------------  
@@ -40,96 +53,93 @@ int main(int argc, char** argv){
 
     connection_result = mavsdk.add_any_connection(argv[1]);
 
-    if(connection_result != ConnectionResult::Success){return 1;} //Failed
+    if(connection_result != ConnectionResult::Success){return 1;}
 
     mavsdk.subscribe_on_new_system([&mavsdk, &discovered_system](){
         const auto system = mavsdk.systems().at(0);
-        if(system -> is_connected()){discovered_system = true;} //Discovered system
-    }); //Waiting to discover system
+        if(system -> is_connected()){discovered_system = true;}
+    });
 
-    this_thread::sleep_for(chrono::seconds(2)); //hearbeats at 1Hz
+    this_thread::sleep_for(chrono::seconds(2));
 
-    if(!discovered_system){return 1;} //No system found
+    if(!discovered_system){return 1;}
 
     const auto system = mavsdk.systems().at(0);
 
     system -> register_component_discovered_callback(
         [](ComponentType com_type) -> void{cout << unsigned(com_type);
-        }); //Register a callback components(camera,gimbal) etc are found
+        });
     
     // 2.regist_telemetry -------------------------------------------------------------------
-    auto telemetry = make_shared<Telemetry>(system); //We want to listen to the altitude of drone at 1Hz
-    const Telemetry::Result set_rate_result = telemetry -> set_rate_position(1.0);
+    auto telemetry = make_shared<Telemetry>(system);
+    const Telemetry::Result set_rate_result = telemetry -> set_rate_position(2.0);
 
-    if(set_rate_result != Telemetry::Result::Success){return 1;} //Set rate failed
+    if(set_rate_result != Telemetry::Result::Success){return 1;}
     telemetry->subscribe_position([](Telemetry::Position position) {
-        cout << " Home latitude : " << position.latitude_deg << endl;
-        cout << " Home longitude : " << position.longitude_deg << endl;
+        cout << " Home latitude : " << position.latitude_deg << endl; //38.1615
+        cout << " Home longitude : " << position.longitude_deg << endl; //-122.455
     });
-    this_thread::sleep_for(chrono::seconds(1)); // Not finished mission
+
+    this_thread::sleep_for(chrono::seconds(1));
 
     telemetry -> subscribe_position([](Telemetry::Position position){
         cout << " Altitude : " << position.relative_altitude_m << "m" << endl;
-    }); //Set up callback to monitor altitude
+    });
 
     while(telemetry -> health_all_ok()!= true){
         cout << " Vehicle is getting ready to arm " <<endl;
         this_thread::sleep_for(chrono::seconds(1));
-    } //Check if vehicle is ready to arm
-
-    // 3. Arm --------------------------------------------------------------------------------
-    auto action = make_shared<Action>(system);
-    cout << " Arming... " << endl;
-    const Action::Result arm_result = action -> arm();
-
-    if(arm_result != Action::Result::Success){
-        cout << " Arming failed : " << arm_result << endl;
-        return 1;
     }
 
-    // 4. Take off ----------------------------------------------------------------------------------
-    cout << " Taking off... " << endl;
-    const Action::Result takeoff_result = action -> takeoff();
-
-    if(takeoff_result != Action::Result::Success){
-        cout << " Takeoff failed : " << takeoff_result << endl;
-        return 1;
-    }
-
-    //10. rotate vehicle 2.test_control에서 실습진행 ------------------------------------------------------------------------------------
-    // auto offboard = make_shared<Offboard>(system);
-    // bool ret = offboard_ctrl_body(offboard);
-    // if(ret == false){return -1;}
-
-    //6. fly_mission upload(1) -------------------------------------------------------------------------------------
+    //3. fly_mission upload(1) -------------------------------------------------------------------------------------
     vector<Mission::MissionItem> mission_items;
     Mission::MissionItem mission_item;
 
-    mission_item.latitude_deg = 47.398170327054473; // range: -90 to +90
-    mission_item.longitude_deg = 8.5456490218639658; // range: -180 to +180
-    mission_item.relative_altitude_m = 10.0f; // takeoff altitude
-    mission_item.speed_m_s = 5.0f;
-    mission_item.is_fly_through = false; // stop on the waypoint, if true don't stop on the waypoint
-    mission_items.push_back(mission_item);
+    // mission_items.push_back(make_mission_item(
+    //     38.161615,
+    //     -122.455200,
+    //     10.0f,
+    //     30.0f,
+    //     true,
+    //     mission_item));
 
-    //waypoint 1
-    mission_item.latitude_deg = 47.399752;
-    mission_item.longitude_deg = 8.545874;
-    mission_item.is_fly_through = false; // stop on the waypoint
-    mission_items.push_back(mission_item);
+    // mission_items.push_back(make_mission_item(
+    //     38.161766,
+    //     -122.455117,
+    //     10.0f,
+    //     30.0f,
+    //     true,
+    //     mission_item));
+
+    // mission_items.push_back(make_mission_item(
+    //     38.161871,
+    //     -122.454869,
+    //     10.0f,
+    //     30.0f,
+    //     true,
+    //     mission_item));
+
+    // mission_items.push_back(make_mission_item(
+    //     38.161741,
+    //     -122.454798,
+    //     10.0f,
+    //     30.0f,
+    //     true,
+    //     mission_item));
     
-    //waypoint 2
-    mission_item.latitude_deg = 47.399759;
-    mission_item.longitude_deg = 8.544865;
-    mission_item.is_fly_through = false; // stop on the waypoint
-    mission_items.push_back(mission_item);
+    //waypoint 1
+    for(double i = 0.0001; i < 0.0007; i=i+0.0001){
+        mission_items.push_back(make_mission_item(
+            38.161615 + i,
+            -122.455200 + i,
+            10.0f,
+            30.0f,
+            false,
+            mission_item));
+        this_thread::sleep_for(chrono::seconds(7)); 
+     }
 
-    //Return to home
-    mission_item.latitude_deg = 47.398170327054473; 
-    mission_item.longitude_deg = 8.5456490218639658; 
-    mission_items.push_back(mission_item);
-
-    //7. fly_mission upload(2) ------------------------------------------------------------------------------------
+    //4. fly_mission upload(2) ------------------------------------------------------------------------------------
     auto mission = make_shared<Mission>(system);
     {
         auto prom = make_shared<promise<Mission::Result>>();
@@ -145,10 +155,30 @@ int main(int argc, char** argv){
 
         const Mission::Result result = future_result.get();
         
-        if (result != Mission::Result::Success) { return 1; } // Mission upload failed
+        if (result != Mission::Result::Success) { return 1; }
     }
 
-    //8. Mission Progress ----------------------------------------------------------------------------
+    // 5. Arm --------------------------------------------------------------------------------
+    auto action = make_shared<Action>(system);
+    cout << " Arming... " << endl;
+    const Action::Result arm_result = action -> arm();
+
+    if(arm_result != Action::Result::Success){
+        cout << " Arming failed : " << arm_result << endl;
+        return 1;
+    }
+
+    // 6. Take off ----------------------------------------------------------------------------------
+    cout << " Taking off... " << endl;
+    const Action::Result takeoff_result = action -> takeoff();
+
+    if(takeoff_result != Action::Result::Success){
+        cout << " Takeoff failed : " << takeoff_result << endl;
+        return 1;
+    }
+
+
+    //7. Mission Progress ----------------------------------------------------------------------------
     {
         cout << " Starting mission. " <<endl;
         auto start_prom = make_shared < promise < Mission::Result >> ();
@@ -159,28 +189,28 @@ int main(int argc, char** argv){
         });
 
         const Mission::Result result = future_result.get();
-        if(result != Mission::Result::Success){return -1;} //Mission start failed
+        if(result != Mission::Result::Success){return 1;}
     }
 
     while(!mission -> is_mission_finished().second){
-        this_thread::sleep_for(chrono::seconds(1)); // Not finished mission
+        this_thread::sleep_for(chrono::seconds(1));
         }
+
+    //8. Return to Home ----------------------------------------------------------------------------------
+    {
+        cout << " Mission Success, Return Home Point! " << endl;
+        const Action::Result result = action->return_to_launch();
+        if (result != Action::Result::Success){
+            cout << " Returning Failed " << endl;
+        }
+    }
 
     //9. Landing ------------------------------------------------------------------------------------
-    this_thread::sleep_for(chrono::seconds(10)); //stuck air
-    cout << " Landing... " << endl;
-    const Action::Result land_result = action -> land();
-
-    if(land_result != Action::Result::Success){return 1;} //Land failed
-
-    while(telemetry -> in_air()){ //Check if vehicle is still in air
-        this_thread::sleep_for(chrono::seconds(1)); //Vehicle is landing...
+    while(telemetry -> armed()){
+        this_thread::sleep_for(chrono::seconds(1));
         }
-    
-    cout << " Landed! " << endl; //Relying on auto-disarming but let's keep watching the telemetry for a bit longer
-    this_thread::sleep_for(chrono::seconds(3));
+    cout << " Landed! " << endl;
     cout << " Finished... " << endl;
-    
     
     return 0;
 }
